@@ -63,6 +63,64 @@ def get_contagion_list_for_quarter(year, quarter):
 
     return result
 
+def get_contagion_list_for_quarter_weights(year, quarter):
+    max_path_length     = 8
+    max_pathlist_length = 8
+
+    # 1) load raw edges + weights
+    edge_attr, single_edge_index = load_data_edgeWeight_quarter(year, quarter)
+    # single_edge_index: [E,2], edge_attr: [E,1]
+
+    # 2) build per-node sorted (neighbor, weight) lists
+    sort_edges = sort_edges_by_weight(single_edge_index, edge_attr)
+    # sort_edges[u] == [(v1,w1), (v2,w2), …]
+
+    # 3) sample purely by topology (as before)
+    adjacency = adjacency_list(sort_edges, max_path_length)
+    all_paths = get_all_paths_from_edge_index(
+        adjacency,
+        single_edge_index.max().item() + 1,
+        max_path_length,
+        max_pathlist_length
+    )
+    all_paths = torch.IntTensor(all_paths)    # [N, P, L]
+
+    # 4) load node features and prepare for indexing
+    feature = load_data_for_quarter(year, quarter)[1]     # [N, 70]
+    new_row = torch.zeros(1, feature.size(1))             # dummy zero‐row
+    feature_extended = torch.cat([feature, new_row], dim=0)  # [N+1, 70]
+
+    # 5) build the node‐feature contagion tensor [N,P,L,70]
+    C_nodes = feature_extended[all_paths]                # [N,P,L,70]
+
+    # ──────────────────────────────────────────────────────────────
+    # 6) build the matching edge‐weight tensor [N,P,L]
+    #    first make a quick lookup from (u,v) to weight (float)
+    weights_lookup = {}
+    for u, nbrs in enumerate(sort_edges):
+        for v, w in nbrs:
+            weights_lookup[(u, int(v))] = float(w)
+
+    N, P, L = all_paths.shape
+    all_weight_paths = []
+    for u in range(N):
+        wp = []
+        for path in all_paths[u].tolist():     # path is length-L list of node IDs
+            w_seq = []
+            for i in range(L-1):
+                a, b = path[i], path[i+1]
+                w_seq.append(weights_lookup.get((u,b), 0.0))
+            w_seq.append(0.0)                  # pad last hop
+            wp.append(w_seq)
+        all_weight_paths.append(wp)
+    C_weights = torch.FloatTensor(all_weight_paths).unsqueeze(-1)  # [N,P,L,1]
+
+    # 7) concatenate node‐features + weights → [N,P,L,71]
+    C = torch.cat([C_nodes, C_weights], dim=3)
+
+    return C
+
+
 def load_data_edgeWeight_quarter(year, quarter, data_dir='graph_data'):
     # Define the file path from which you want to propagate your data#
     
@@ -110,11 +168,9 @@ def load_data_edgeWeight_quarter(year, quarter, data_dir='graph_data'):
     edge_attr = torch.unsqueeze(edge_attr, dim=1)
     return edge_attr, single_edge_index
 
-
 ##################
 # This function given the edges_attr (weight) and single_edge_index (start, end)
-# It first find the num_nodes that will be used to fond how many small lists [] we need (one per node)
-#
+# It first find the num_nodes that will be used to find how many small lists [] we need (one per node)
 ##################
 def sort_edges_by_weight(edge_index, edge_weights):
     num_nodes = edge_index.max().item() + 1
@@ -127,6 +183,7 @@ def sort_edges_by_weight(edge_index, edge_weights):
     for group in edge_groups:
         random.shuffle(group)
     return edge_groups
+
 ############
 # function that orchestrate find_path and find_paths to iterate over all nodes doing DFS
 ###########
@@ -153,13 +210,7 @@ def get_all_paths_from_edge_index(truncated_list, num_nodes, max_path_length, ma
 ##########
 # Similar to adjacency_list but we also keep the information of weights
 ###########
-def adjacency_list_with_weights(sorted_edge_groups, max_path_length):
-    # Instead of dropping weights, keep them:
-    adj_list = []
-    for edges in sorted_edge_groups:
-        # edges is [(neighbor, weight), …]
-        adj_list.append(edges[:max_path_length])
-    return adj_list
+
 ###################
 # We randomly sample some nodes that of the form: [[ (v₁, w₁), (v₂, w₂), … ], # node 0 [ (u₁, x₁), … ], # node 1 … ]
 # We take for each one of them only the neighbours and extract only the ones that are present inside the max_path_lengh 
@@ -175,7 +226,19 @@ def adjacency_list(sorted_edge_groups, max_path_length):
 ########
 # Need another function to compute contagion with weights
 #########
-#def ....
+def adjacency_list_with_weights(sorted_edge_groups, max_path_length):
+    """
+    Returns for each node u a list of up to max_path_length
+    (neighbor_id, edge_weight) tuples, in the order produced
+    by sort_edges_by_weight.
+    """
+    # sorted_edge_groups[u] is already a list of (v, w) pairs
+    weighted_adj = [
+        edges[:max_path_length] if len(edges)>max_path_length else edges
+        for edges in sorted_edge_groups
+    ]
+    return weighted_adj
+
 
 #################
 # This takes the truncated_list of the nodes, given a node, 
