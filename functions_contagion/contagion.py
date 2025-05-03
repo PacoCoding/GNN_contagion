@@ -54,16 +54,13 @@ def get_contagion_list_for_quarter(year, quarter):
     return result
 
 def load_data_edgeWeight_quarter(year, quarter, data_dir='graph_data'):
-    if (quarter != 4):
-        # Edge = "../../../datasets/{}/edge_Q/edge_".format(data_dir) + \
-            # str(year) + "Q" + str(quarter) + ".csv"
-        Edge = "../../../datasets/edges/edge_" + \
-            str(year) + "Q" + str(quarter) + ".csv"
-    elif (quarter == 4):
-        # Edge = "../../../datasets/{}/edge_Q/edge_".format(data_dir) + \
-        #     str(year) + "Q" + str(quarter) + ".csv"
-        Edge = "../../../datasets/edges/edge_" + \
-            str(year) + "Q" + str(quarter) + ".csv"
+    # Define the file path from which you want to propagate your data#
+    
+    # Edge = "../../../datasets/{}/edge_Q/edge_".format(data_dir) + \
+        # str(year) + "Q" + str(quarter) + ".csv"
+    Edge = "../../../datasets/edges/edge_" + \
+    str(year) + "Q" + str(quarter) + ".csv"
+    # We read the file path from
     edge_attr = []
     single_edge_index = []
     with open(Edge, "r") as f:
