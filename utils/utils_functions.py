@@ -29,3 +29,28 @@ def enrich_nodes(nodes_df, edges_df):
     if TARGET in df.columns:
         merged[TARGET] = df[TARGET].values
     return merged
+
+def build_sequence(idxs, pers_fail, preproc):
+            seq = []
+            for i in idxs:
+                df_i, ed_i, _ = usable[i]
+                raw = df_i[FEATURES].values
+                newly = set(df_i['BankID'].iloc[np.where(raw[:,2]<0)[0]])
+                pers_fail |= newly
+                dead = np.array([bid in pers_fail for bid in df_i['BankID']])
+                feats = preproc.transform(raw)
+                feats[dead] = 0
+                x = torch.tensor(feats, dtype=torch.float, device=DEVICE)
+
+                lm = {b: idx for idx, b in enumerate(df_i['BankID'])}
+                src = ed_i['Sourceid'].map(lm).fillna(-1).astype(int).values
+                dst = ed_i['Targetid'].map(lm).fillna(-1).astype(int).values
+                valid = (src>=0)&(dst>=0)
+                src, dst = src[valid], dst[valid]
+                keep = (~dead[src]) & (~dead[dst])
+                edge_index = torch.tensor([src[keep], dst[keep]], dtype=torch.long, device=DEVICE)
+                edge_weight = torch.tensor(ed_i['Weights'].values[valid][keep], dtype=torch.float, device=DEVICE)
+
+                seq.append(Data(x=x, edge_index=edge_index, edge_weight=edge_weight))
+            return seq, pers_fail
+
